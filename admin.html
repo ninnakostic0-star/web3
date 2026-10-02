@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>NK Photography · Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+  :root { --bg:#f6f4f0; --card:#fff; --line:#e4ddd5; --ink:#2b2520; --muted:#7b7068; --accent:#8a6f57; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  header { position:sticky; top:0; z-index:20; background:var(--card); border-bottom:1px solid var(--line); padding:10px 16px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; flex:1; }
+  nav { display:flex; gap:6px; padding:10px 16px; overflow-x:auto; background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:53px; z-index:19; }
+  nav button { white-space:nowrap; border:1px solid var(--line); background:#fff; padding:8px 14px; border-radius:20px; font:inherit; cursor:pointer; }
+  nav button.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+  main { max-width:900px; margin:0 auto; padding:18px 16px 80px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  h2 { font-size:18px; margin:0 0 12px; } h3 { font-size:15px; margin:18px 0 8px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, textarea, select { width:100%; padding:10px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; }
+  input[type=color] { height:42px; padding:2px; width:120px; }
+  textarea { min-height:90px; resize:vertical; }
+  button.b { border:1px solid var(--line); background:#fff; padding:9px 14px; border-radius:6px; font:inherit; cursor:pointer; }
+  button.p { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.d { color:#b00020; border-color:#e8c3c8; }
+  button.s { padding:5px 10px; font-size:13px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+  .thumb { width:100%; max-height:220px; object-fit:cover; border-radius:6px; display:block; background:#eee; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .chip { position:relative; } .chip img { width:84px; height:84px; object-fit:cover; border-radius:6px; display:block; }
+  .chip b { position:absolute; top:3px; right:3px; background:#000b; color:#fff; width:22px; height:22px; border-radius:50%; text-align:center; line-height:22px; cursor:pointer; font-size:14px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; }
+  .item { position:relative; border:3px solid transparent; border-radius:8px; cursor:pointer; overflow:hidden; }
+  .item img { width:100%; aspect-ratio:1; object-fit:cover; display:block; }
+  .item.sel { border-color:var(--accent); }
+  .item .x { position:absolute; bottom:4px; right:4px; }
+  #login { max-width:360px; margin:12vh auto; }
+  #modal { display:none; position:fixed; inset:0; background:#000a; z-index:50; padding:20px 12px; overflow-y:auto; }
+  #modal.open { display:block; }
+  #modal .box { background:#fff; max-width:860px; margin:0 auto; border-radius:10px; padding:16px; }
+  #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--ink); color:#fff; padding:10px 18px; border-radius:20px; display:none; z-index:99; }
+  .dirty { color:#b45309; font-size:13px; }
+  .arow { display:flex; align-items:center; gap:6px; padding:8px 0; border-bottom:1px solid var(--line); } .arow span { flex:1; }
+</style>
+</head>
+<body>
+
+<div id="login" class="card" style="display:none">
+  <h2>Admin login</h2>
+  <label>Email</label><input id="lEmail" type="email" autocomplete="username">
+  <label>Password</label><input id="lPass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+  <div class="row"><button class="b p" onclick="login()">Log in</button></div>
+  <p id="lErr" style="color:#b00020"></p>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <h1>NK Photography · Admin</h1>
+    <span class="dirty" id="dirty"></span>
+    <a class="b" href="/" target="_blank" style="text-decoration:none;color:inherit;border:1px solid var(--line);padding:8px 12px;border-radius:6px">View site</a>
+    <button class="b p" onclick="save()">Save changes</button>
+    <button class="b" onclick="logout()">Log out</button>
+  </header>
+  <nav id="tabs"></nav>
+  <main id="view"></main>
+</div>
+
+<div id="modal"><div class="box">
+  <div class="row" style="margin:0 0 12px">
+    <h2 style="flex:1;margin:0">Choose a photo</h2>
+    <button class="b p" id="mDone" onclick="closeModal([...libSel])">Use selected</button>
+    <button class="b" onclick="closeModal([])">Cancel</button>
+  </div>
+  <button class="b" onclick="uploadClick(true)">⬆ Upload new photos</button>
+  <div class="grid" id="mGrid" style="margin-top:12px"></div>
+</div></div>
+<div id="toast"></div>
+
+<script>
+const SUPABASE_URL = "https://ulrexudwcbdrbulrcjiy.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVscmV4dWR3Y2JkcmJ1bHJjaml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA5NjgwNzMsImV4cCI6MjEwNjU0NDA3M30.VBZo3ktdH2lh9JPBiInbALT4nrLDm4MHZsKUQCxVLpA";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const DEF_HERO = "https://images.unsplash.com/photo-1511895426328-dc8714191300?auto=format&fit=crop&w=1800&q=85";
+const SECTIONS = { about:"About", portfolio:"Portfolio", services:"Services", booking:"Book a session" };
+const TABS = ["Photos","Page text","Portfolio","Services","Style & layout","Advanced"];
+const COLORS = [["cream","Page background"],["white","Cards & white areas"],["beige","Soft background"],["sand","Soft accent"],["brown","Brown details"],["dark","Main dark (text, header, footer)"],["muted","Muted text"],["line","Lines & borders"],["accent","Accent (buttons, highlights)"]];
+const FONTS = ["Playfair Display","DM Sans","Cormorant Garamond","Lora","Libre Baskerville","DM Serif Display","Montserrat","Poppins","Inter","Lato","Nunito","Raleway","Work Sans","Josefin Sans"];
+let COLOR_DEF = {};
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? "").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+
+let data, TEXTS = [], defsMap = {}, DEF_ABOUT = "", tab = 0, dirty = false;
+let libResolve = null, libMulti = false, libSel = new Set(), libPick = false;
+
+function toast(t, ms) { const e=$("toast"); e.textContent=t; e.style.display="block"; if(ms) setTimeout(()=>e.style.display="none", ms); }
+function markDirty() { dirty = true; $("dirty").textContent = "● Unsaved changes"; }
+window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+/* ---------- auth ---------- */
+async function boot() {
+  const { data:{ session } } = await sb.auth.getSession();
+  if (session) start(); else { $("login").style.display = "block"; }
+}
+async function login() {
+  const { error } = await sb.auth.signInWithPassword({ email:$("lEmail").value.trim(), password:$("lPass").value });
+  if (error) $("lErr").textContent = "Login failed: " + error.message; else { $("login").style.display="none"; start(); }
+}
+async function logout() { if (dirty && !confirm("You have unsaved changes. Log out anyway?")) return; dirty=false; await sb.auth.signOut(); location.reload(); }
+
+/* ---------- load ---------- */
+function normalize(d) {
+  d.texts ||= {}; d.meta ||= {}; d.images ||= {}; d.theme ||= {}; d.sections ||= {};
+  if (!d.sections.order?.length) d.sections.order = ["about","portfolio","services","booking"];
+  d.sections.hidden ||= []; d.categories ||= []; d.services ||= [];
+  d.categories.forEach(c => c.photos ||= []);
+  return d;
+}
+async function start() {
+  $("app").style.display = "block"; $("view").innerHTML = "<p>Loading…</p>";
+  try {
+    const win = await new Promise((res, rej) => {
+      const f = document.createElement("iframe"); f.style.display = "none"; f.src = "/";
+      f.onload = () => res(f.contentWindow); f.onerror = rej; document.body.appendChild(f);
+    });
+    const M = win.EDIT_META;
+    TEXTS = M.texts.map(t => ({ key:t.key, label:t.label, group:t.group, def:t.def }));
+    TEXTS.forEach(t => defsMap[t.key] = t.def);
+    DEF_ABOUT = M.DEF_ABOUT; COLOR_DEF = { ...M.colors };
+    const defaults = JSON.parse(JSON.stringify(M.defaults));
+    const { data: row } = await sb.from("site_content").select("data").eq("id", 1).maybeSingle();
+    data = normalize(row?.data || defaults);
+  } catch (e) { $("view").innerHTML = "<p>Could not load the site: " + e.message + "</p>"; return; }
+  render();
+}
+async function save() {
+  const { error } = await sb.from("site_content").upsert({ id:1, data, updated_at:new Date().toISOString() });
+  if (error) { alert("Could not save: " + error.message); return; }
+  dirty = false; $("dirty").textContent = ""; toast("Saved — your site is updated.", 2500);
+}
+
+/* ---------- editing helpers ---------- */
+function setPath(p, v) {
+  const k = p.split("."); let o = data;
+  for (let i = 0; i < k.length - 1; i++) o = o[k[i]];
+  const last = k[k.length-1];
+  if (k[0] === "texts" && (v.trim() === "" || v.trim() === defsMap[last])) delete o[last]; else o[last] = v;
+  markDirty();
+}
+const upd = el => setPath(el.dataset.p, el.value);
+const inp = (p, v, label, area) => `<label>${label}</label>` + (area
+  ? `<textarea data-p="${p}" oninput="upd(this)">${esc(v)}</textarea>`
+  : `<input data-p="${p}" value="${esc(v)}" oninput="upd(this)">`);
+async function changeImage(path) { const u = await pickPhotos(false); if (u[0]) { setPath(path, u[0]); render(); } }
+async function addGallery(i) { const u = await pickPhotos(true); if (u.length) { data.categories[i].photos.push(...u); markDirty(); render(); } }
+function removePhoto(i, j) { data.categories[i].photos.splice(j,1); markDirty(); render(); }
+function move(list, i, d) { const a = list==="sections" ? data.sections.order : data[list], j=i+d; if (j<0||j>=a.length) return; [a[i],a[j]]=[a[j],a[i]]; markDirty(); render(); }
+function toggleSec(k) { const h=data.sections.hidden, i=h.indexOf(k); i>=0 ? h.splice(i,1) : h.push(k); markDirty(); render(); }
+function addItem(list) {
+  if (list==="categories") data.categories.push({ name:"New Category", description:"Describe this category.", image:"https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&w=1000&q=85", photos:[] });
+  else data.services.push({ name:"New Service", description:"Describe this session.", price:"Price coming soon" });
+  markDirty(); render();
+}
+function delItem(list, i) { if (list==="categories" && data.categories.length<=1) return alert("Keep at least one category."); if (!confirm("Delete this?")) return; data[list].splice(i,1); markDirty(); render(); }
+function resetColors() { COLORS.forEach(([k]) => delete data.theme[k]); markDirty(); render(); }
+
+/* ---------- tabs ---------- */
+function render() {
+  $("tabs").innerHTML = TABS.map((t,i) => `<button class="${i===tab?"on":""}" onclick="tab=${i};render()">${t}</button>`).join("");
+  const v = $("view");
+  if (tab === 0) { v.innerHTML = `<div class="card"><h2>Photo library</h2><p style="color:var(--muted);margin-top:0">Upload photos here. To use one, go to Portfolio or Style &amp; layout and choose it. Deleting a photo here removes it from storage.</p><button class="b p" onclick="uploadClick(false)">⬆ Upload photos</button><div class="grid" id="libGrid" style="margin-top:14px"></div></div>`; loadLibrary($("libGrid"), false); }
+  if (tab === 1) v.innerHTML = tabText();
+  if (tab === 2) v.innerHTML = tabPortfolio();
+  if (tab === 3) v.innerHTML = tabServices();
+  if (tab === 4) v.innerHTML = tabStyle();
+  if (tab === 5) v.innerHTML = tabAdvanced();
+}
+function filterText(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll(".tf").forEach(e => e.style.display = e.dataset.q.includes(q) ? "" : "none");
+}
+function tabText() {
+  let h = `<div class="card"><h2>Contact</h2>${inp("email", data.email, "Booking email (inquiries go here)")}${inp("about", data.about, "About text (main paragraph)", true)}</div>
+  <div class="card"><input placeholder="🔍 Search any text on the site…" oninput="filterText(this.value)"><p style="color:var(--muted);font-size:13px;margin:8px 0 0">Every piece of text on your site is listed below. Clear a box to restore the original.</p></div>`;
+  const groups = {};
+  TEXTS.forEach(t => (groups[t.group] ||= []).push(t));
+  for (const g in groups) h += `<div class="card"><h2>${g}</h2>` + groups[g].map(t => {
+    const val = data.texts[t.key] ?? t.def;
+    return `<div class="tf" data-q="${esc((t.label + " " + val).toLowerCase())}">` + inp("texts." + t.key, val, t.label, val.length > 60) + `</div>`;
+  }).join("") + `</div>`;
+  return h;
+}
+function tabPortfolio() {
+  return data.categories.map((c,i) => `<div class="card"><h2>${esc(c.name)}</h2>
+    ${inp(`categories.${i}.name`, c.name, "Category name")}
+    ${inp(`categories.${i}.description`, c.description, "Short description")}
+    <label>Cover photo</label><img class="thumb" src="${esc(c.image)}">
+    <div class="row"><button class="b s" onclick="changeImage('categories.${i}.image')">Replace cover photo</button></div>
+    <label>Gallery photos (opened when visitors click this category)</label>
+    <div class="chips">${c.photos.map((u,j)=>`<div class="chip"><img src="${esc(u)}"><b onclick="removePhoto(${i},${j})">×</b></div>`).join("")}</div>
+    <div class="row"><button class="b s" onclick="addGallery(${i})">+ Add photos</button></div>
+    <div class="row" style="margin-top:14px"><button class="b s" onclick="move('categories',${i},-1)">▲ Up</button><button class="b s" onclick="move('categories',${i},1)">▼ Down</button><button class="b s d" onclick="delItem('categories',${i})">Delete category</button></div>
+  </div>`).join("") + `<button class="b p" onclick="addItem('categories')">+ Add category</button>`;
+}
+function tabServices() {
+  return data.services.map((s,i) => `<div class="card"><h2>${esc(s.name)}</h2>
+    ${inp(`services.${i}.name`, s.name, "Service name")}
+    ${inp(`services.${i}.description`, s.description, "Description", true)}
+    ${inp(`services.${i}.price`, s.price, "Price")}
+    <div class="row" style="margin-top:14px"><button class="b s" onclick="move('services',${i},-1)">▲ Up</button><button class="b s" onclick="move('services',${i},1)">▼ Down</button><button class="b s d" onclick="delItem('services',${i})">Delete service</button></div>
+  </div>`).join("") + `<button class="b p" onclick="addItem('services')">+ Add service</button>`;
+}
+function tabStyle() {
+  const sec = data.sections.order.map((k,i) => `<div class="arow"><span>${SECTIONS[k]}${data.sections.hidden.includes(k)?" (hidden)":""}</span>
+    <button class="b s" onclick="move('sections',${i},-1)">▲</button><button class="b s" onclick="move('sections',${i},1)">▼</button>
+    <button class="b s" onclick="toggleSec('${k}')">${data.sections.hidden.includes(k)?"Show":"Hide"}</button></div>`).join("");
+  const fontSel = (p, cur, def) => `<select data-p="${p}" onchange="upd(this)">${FONTS.map(f => `<option ${f === (cur || def) ? "selected" : ""}>${f}</option>`).join("")}</select>`;
+  return `<div class="card"><h2>Main photos</h2>
+    <label>Home background photo</label><img class="thumb" src="${esc(data.images.hero||DEF_HERO)}"><div class="row"><button class="b s" onclick="changeImage('images.hero')">Replace photo</button></div>
+    <label>About photo</label><img class="thumb" src="${esc(data.images.about||DEF_ABOUT)}"><div class="row"><button class="b s" onclick="changeImage('images.about')">Replace photo</button></div></div>
+  <div class="card"><h2>Sizes</h2>
+    ${inp("theme.heroH", data.theme.heroH || 680, "Home photo height (px)")}
+    ${inp("theme.cardH", data.theme.cardH || 390, "Portfolio card height (px)")}</div>
+  <div class="card"><h2>Fonts</h2>
+    <label>Headings font</label>${fontSel("theme.fontHead", data.theme.fontHead, "Playfair Display")}
+    <label>Body font</label>${fontSel("theme.fontBody", data.theme.fontBody, "DM Sans")}</div>
+  <div class="card"><h2>Colors</h2>
+    ${COLORS.map(([k, l]) => `<label>${l}</label><input type="color" data-p="theme.${k}" value="${data.theme[k] || COLOR_DEF[k]}" oninput="upd(this)">`).join("")}
+    <div class="row"><button class="b s" onclick="resetColors()">Reset all colors</button></div></div>
+  <div class="card"><h2>Section order</h2>${sec}</div>`;
+}
+function tabAdvanced() {
+  return `<div class="card"><h2>Search engines</h2>
+    ${inp("meta.title", data.meta.title || "", "Browser tab / Google title")}
+    ${inp("meta.description", data.meta.description || "", "Google description", true)}</div>
+  <div class="card"><h2>Custom CSS (full control)</h2>
+    <p style="color:var(--muted);font-size:13px;margin-top:0">Anything here is applied on top of the whole site, so you can restyle any element. Example: <code>.hero { min-height: 500px; } h1 { font-size: 3rem; }</code></p>
+    <textarea data-p="customCss" oninput="upd(this)" style="min-height:260px;font-family:monospace;font-size:13px">${esc(data.customCss || "")}</textarea></div>`;
+}
+
+/* ---------- photo library ---------- */
+async function uploadImage(file) {
+  const bmp = await createImageBitmap(file);
+  const sc = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas"); c.width = Math.round(bmp.width*sc); c.height = Math.round(bmp.height*sc);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.85));
+  const name = `${Date.now()}-${Math.random().toString(36).slice(2,7)}.jpg`;
+  const { error } = await sb.storage.from("photos").upload(name, blob, { contentType:"image/jpeg" });
+  if (error) throw error;
+  return sb.storage.from("photos").getPublicUrl(name).data.publicUrl;
+}
+function uploadClick(fromModal) {
+  const f = document.createElement("input"); f.type="file"; f.accept="image/*"; f.multiple=true;
+  f.onchange = async () => {
+    toast("Uploading…"); const urls = [];
+    try { for (const file of f.files) urls.push(await uploadImage(file)); toast("Uploaded " + urls.length + " photo(s)", 2000); }
+    catch (e) { toast("Upload failed", 1500); alert("Upload failed: " + e.message); }
+    if (fromModal) { if (!libMulti && urls[0]) return closeModal([urls[0]]); urls.forEach(u => libSel.add(u)); loadLibrary($("mGrid"), true); }
+    else loadLibrary($("libGrid"), false);
+  };
+  f.click();
+}
+async function loadLibrary(grid, pick) {
+  grid.innerHTML = "<p>Loading…</p>";
+  const { data: files, error } = await sb.storage.from("photos").list("", { limit:300, sortBy:{ column:"created_at", order:"desc" } });
+  if (error) { grid.innerHTML = "<p>Could not load photos: " + error.message + "</p>"; return; }
+  const imgs = (files||[]).filter(f => f.name && !f.name.startsWith("."));
+  if (!imgs.length) { grid.innerHTML = "<p style='color:var(--muted)'>No photos uploaded yet.</p>"; return; }
+  grid.innerHTML = imgs.map(f => {
+    const url = sb.storage.from("photos").getPublicUrl(f.name).data.publicUrl;
+    return `<div class="item ${libSel.has(url)?"sel":""}" ${pick?`onclick="selectPhoto('${url}',this)"`:""}><img loading="lazy" src="${url}">${pick?"":`<button class="b s d x" onclick="delPhoto('${f.name}')">Delete</button>`}</div>`;
+  }).join("");
+}
+async function delPhoto(name) {
+  if (!confirm("Delete this photo from storage? Any place using it will show a broken image.")) return;
+  const { error } = await sb.storage.from("photos").remove([name]);
+  if (error) alert(error.message); else loadLibrary($("libGrid"), false);
+}
+function pickPhotos(multi) {
+  return new Promise(res => {
+    libResolve = res; libMulti = multi; libSel = new Set();
+    $("mDone").style.display = multi ? "" : "none"; $("modal").classList.add("open");
+    loadLibrary($("mGrid"), true);
+  });
+}
+function selectPhoto(url, el) {
+  if (!libMulti) return closeModal([url]);
+  libSel.has(url) ? libSel.delete(url) : libSel.add(url); el.classList.toggle("sel");
+}
+function closeModal(v) { $("modal").classList.remove("open"); if (libResolve) { libResolve(v || []); libResolve = null; } }
+
+boot();
+</script>
+</body>
+</html>
